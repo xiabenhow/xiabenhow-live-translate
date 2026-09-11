@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>下班隨手作 · 上課即時翻譯</title>
+<style>
+:root{--bg:#f6f4ef;--card:#fff;--ink:#1d1d1b;--mute:#7a766e;--line:#e6e2d8;--brand:#c8552d;--brand2:#f3d9cf;--ok:#2e8b57;--warn:#b7791f;--stu:#2b5fa8;--stu2:#dfe8f7;--r:14px}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{font-family:-apple-system,"PingFang TC","Noto Sans TC","Helvetica Neue",Arial,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+button{font:inherit;border:0;border-radius:12px;padding:12px 18px;cursor:pointer;background:#e9e5dc;color:var(--ink)}
+button.pri{background:var(--brand);color:#fff}button.ghost{background:transparent;border:1.5px solid var(--line)}
+button:disabled{opacity:.45;cursor:default}
+input,select,textarea{font:inherit;border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff;color:var(--ink)}
+.hide{display:none!important}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;background:#eee;color:#555;vertical-align:middle}
+.tag.live{background:#d9f2e3;color:#1b6b3a}.tag.off{background:#f0e6e6;color:#8a3b3b}.tag.wait{background:#fbf0d9;color:#8a5a12}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#bbb;margin-right:6px}.dot.on{background:var(--ok);box-shadow:0 0 0 4px #d9f2e3}
+.dot.err{background:#c0392b}
+/* ---------- 老師端 ---------- */
+#teacher{display:flex;flex-direction:column;height:100%;min-height:100vh}
+.tbar{display:flex;align-items:center;gap:14px;padding:12px 18px;background:#fff;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tbar h1{font-size:17px;margin:0;font-weight:700}
+.tbar .grow{flex:1}
+.tbar .stat{font-size:13px;color:var(--mute)}
+.tbody{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px;min-height:0}
+@media(max-width:820px){.tbody{grid-template-columns:1fr;grid-template-rows:auto 1fr}}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.panel h2{margin:0;padding:12px 16px;font-size:14px;color:var(--mute);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.panel .scroll{flex:1;overflow-y:auto;padding:12px 16px}
+.q{margin:0 0 14px;padding:12px 14px;border-radius:12px;background:var(--stu2);border-left:4px solid var(--stu)}
+.q .who{font-size:12px;color:var(--stu);font-weight:700;margin-bottom:4px}
+.q .zh{font-size:26px;line-height:1.35;font-weight:600}
+.q .src{font-size:14px;color:var(--mute);margin-top:6px}
+.q.live .zh::after{content:"▍";animation:blink 1s infinite;color:var(--stu)}
+.out{margin:0 0 10px;font-size:20px;line-height:1.4}
+.out.live::after{content:"▍";animation:blink 1s infinite;color:var(--brand)}
+#ofeed .zh{display:block;font-size:13px;color:var(--mute);margin:0 0 10px}
+@keyframes blink{50%{opacity:0}}
+.setup{max-width:560px;margin:40px auto;background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:26px 28px}
+.setup h1{font-size:22px;margin:0 0 4px}.setup p{color:var(--mute);margin:0 0 18px;font-size:14px}
+.setup .row{display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap}.setup label{width:90px;color:var(--mute);font-size:14px}
+.setup input,.setup select{flex:1;min-width:120px}
+.roomcode{font-size:40px;font-weight:800;letter-spacing:4px;color:var(--brand)}
+.qrwrap{display:flex;gap:18px;align-items:center;margin:14px 0}
+#qr{width:132px;height:132px;background:#fff;padding:6px;border:1px solid var(--line);border-radius:10px}
+#qr img,#qr canvas{width:120px!important;height:120px!important}
+.link{font-size:13px;word-break:break-all;color:var(--mute)}
+.bigqr{position:fixed;inset:0;background:rgba(255,255,255,.96);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:50}
+#qrbig{width:min(70vw,70vh)}#qrbig img,#qrbig canvas{width:100%!important;height:100%!important}
+.bigqr .code{font-size:44px;font-weight:800;letter-spacing:6px;color:var(--brand)}
+.err{background:#fde8e6;color:#8b2c22;padding:10px 14px;border-radius:10px;font-size:14px;margin:10px 0}
+.toggle{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--mute);cursor:pointer;user-select:none}
+.toggle input{width:18px;height:18px;margin:0}
+/* ---------- 學員端 ---------- */
+#student{display:flex;flex-direction:column;height:100vh;height:100dvh}
+.sbar{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fff;border-bottom:1px solid var(--line);font-size:13px}
+.sbar b{font-size:15px}.sbar .grow{flex:1}
+.feed{flex:1;overflow-y:auto;padding:14px 16px 8px;scroll-behavior:smooth}
+.ln{margin:0 0 14px;font-size:26px;line-height:1.35;font-weight:600;color:#3a3936}
+.ln.live{color:var(--ink)}.ln.live::after{content:"▍";animation:blink 1s infinite;color:var(--brand)}
+.ln.old{font-size:20px;font-weight:500;color:#8a877f}
+.ln.me{font-size:16px;color:var(--stu);font-weight:500;padding:8px 12px;background:var(--stu2);border-radius:10px}
+.ln.me .zh{display:block;color:#3b4a63;font-size:15px;margin-top:2px}
+.ln.peer{font-size:16px;color:#6b6b66;padding:8px 12px;background:#eeece6;border-radius:10px}
+.ln .who{display:block;font-size:12px;opacity:.75;margin-bottom:2px}
+.sfoot{padding:10px 14px calc(12px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid var(--line)}
+#ptt{width:100%;padding:18px;font-size:19px;font-weight:700;border-radius:16px;background:var(--stu);color:#fff;-webkit-user-select:none;user-select:none;touch-action:none}
+#ptt.on{background:#c0392b;animation:pulse 1s infinite}
+#ptt.wait{background:#7d8ea8}
+@keyframes pulse{50%{box-shadow:0 0 0 10px rgba(192,57,43,.25)}}
+.hint{font-size:12px;color:var(--mute);text-align:center;margin-top:8px}
+.glossary{background:#fff;border-bottom:1px solid var(--line);padding:8px 14px;font-size:13px;color:#555;max-height:34vh;overflow:auto}
+.glossary summary{cursor:pointer;font-weight:600}
+.glossary pre{white-space:pre-wrap;margin:6px 0 0;font:inherit}
+.join{max-width:420px;margin:60px auto;padding:0 20px;text-align:center}
+.join h1{font-size:24px;margin:0 0 6px}.join p{color:var(--mute);margin:0 0 20px}
+.join input{width:100%;font-size:18px;text-align:center;margin-bottom:12px}
+.join button{width:100%;font-size:18px;padding:14px}
+.waiting{text-align:center;color:var(--mute);padding:60px 20px;font-size:16px}
+</style>
+</head>
+<body>
+
+<!-- ============ 老師端 ============ -->
+<div id="teacher" class="hide">
+  <div id="tsetup" class="setup">
+    <h1>上課即時翻譯</h1>
+    <p>你講中文，學員手機上看到翻譯字幕；學員按住講話，你這裡看到中文。</p>
+    <div class="row"><label>教室代碼</label><span class="roomcode" id="roomcode">----</span><button class="ghost" id="newroom">換一組</button></div>
+    <div class="row"><label>翻成</label><select id="lang"></select></div>
+    <div class="row"><label>老師 PIN</label><input id="pin" type="password" inputmode="numeric" placeholder="老師才有的 PIN" autocomplete="off"></div>
+    <div class="row"><label>本堂詞彙</label><textarea id="glossary" rows="3" placeholder="給學員看的中英對照，一行一個，例如：&#10;永生花 = preserved flower&#10;熱熔槍 = hot glue gun" style="flex:1"></textarea></div>
+    <div class="qrwrap"><div id="qr"></div><div><div class="link" id="roomlink"></div><div style="margin-top:8px"><button class="ghost" id="showqr">放大 QR 給學員掃</button></div></div></div>
+    <div id="terr" class="err hide"></div>
+    <div class="row" style="margin-top:8px"><button class="pri" id="start" style="font-size:18px;padding:14px 28px">開始上課</button><span class="stat" id="setupstat"></span></div>
+  </div>
+
+  <div id="tlive" class="hide" style="display:contents">
+    <div class="tbar">
+      <h1>上課即時翻譯</h1>
+      <span class="tag" id="tstatus"><span class="dot"></span>連線中</span>
+      <span class="stat">教室 <b id="roomcode2" style="color:var(--brand);letter-spacing:2px"></b> · <span id="langlabel"></span></span>
+      <span class="stat" id="meter">0 分 · NT$0</span>
+      <span class="stat" id="stucount"></span>
+      <span class="grow"></span>
+      <label class="toggle"><input type="checkbox" id="spk"> 喇叭播翻譯語音</label>
+      <label class="toggle"><input type="checkbox" id="showin" checked> 顯示我的中文</label>
+      <button class="ghost" id="showqr2">QR</button>
+      <button id="pause">暫停（下課休息）</button>
+      <button class="ghost" id="end">結束</button>
+    </div>
+    <div id="terr2" class="err hide" style="margin:10px 14px 0"></div>
+    <div class="tbody">
+      <div class="panel"><h2>學員說的（已翻成中文）<span class="tag" id="qcount">0</span></h2><div class="scroll" id="qfeed"><div class="waiting">學員按住手機上的「Hold to speak」講話，翻好的中文會出現在這裡。</div></div></div>
+      <div class="panel"><h2>我正在說的 → <span id="langlabel2"></span> 字幕</h2><div class="scroll" id="ofeed"></div></div>
+    </div>
+  </div>
+
+  <div id="bigqr" class="bigqr hide"><div class="code" id="bigcode"></div><div id="qrbig"></div><div class="link" id="biglink"></div><div style="font-size:15px;color:var(--mute)">掃描後輸入名字就能看字幕 · Scan to see live captions</div><button class="pri" id="closeqr">關閉</button></div>
+</div>
+
+<!-- ============ 學員端 ============ -->
+<div id="student" class="hide">
+  <div id="sjoin" class="join">
+    <h1>Live captions</h1>
+    <p id="jsub">Room <b id="jroom"></b> · 下班隨手作</p>
+    <input id="sname" placeholder="Your name / 你的名字" maxlength="30" autocomplete="off">
+    <button class="pri" id="join">Join</button>
+    <div id="serr" class="err hide" style="text-align:left"></div>
+  </div>
+  <div id="slive" class="hide" style="display:contents">
+    <div class="sbar"><b>下班隨手作</b><span id="sstatus" class="tag wait">waiting</span><span class="grow"></span>
+      <label class="toggle"><input type="checkbox" id="tts"> 🔊 read aloud</label>
+      <label class="toggle"><input type="checkbox" id="big"> Aa</label></div>
+    <details class="glossary hide" id="gbox"><summary>Vocabulary for this class</summary><pre id="gtext"></pre></details>
+    <div class="feed" id="feed"><div class="waiting" id="swait">Waiting for the teacher to start…<br>老師還沒開始</div></div>
+    <div class="sfoot"><button id="ptt">🎤 Hold to speak (English)</button><div class="hint" id="shint">Hold the button, ask your question, release. The teacher sees it in Chinese.</div></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+/* ================= 共用 ================= */
+const CFG = {
+  firebase: { apiKey:"AIzaSyB99DpIA1dNr-e2NUfXzAkk-lVoi_yxbvg", authDomain:"xiabenhowdata.firebaseapp.com", projectId:"xiabenhowdata", appId:"1:1069329462202:web:48c6ca6ac786f9c8cca383" },
+  // 發 client secret 的後端（Apps Script 網頁應用程式，OpenAI 金鑰放在那邊，不在這頁）
+  secretApi: "https://script.google.com/macros/s/AKfycby_GHvO1yWltJuFKQUvfBLo7mzjhodFdr_xUh8G9W_BMmz3MWjkUye7LninGXzl3ryn/exec",
+  callUrl: "https://api.openai.com/v1/realtime/translations/calls",
+  usdPerMin: 0.034, twd: 32,
+  langs: [["en","English 英文"],["ja","日本語 日文"],["ko","한국어 韓文"],["fr","Français 法文"],["de","Deutsch 德文"],["es","Español 西班牙文"],["pt","Português 葡萄牙文"],["it","Italiano 義大利文"],["id","Bahasa Indonesia 印尼文"],["vi","Tiếng Việt 越南文"],["hi","हिन्दी 印地文"],["ru","Русский 俄文"],["zh","中文"]],
+};
+const $ = s => document.querySelector(s);
+const params = new URLSearchParams(location.search);
+const ROOM = (params.get('r') || '').replace(/\D/g,'').slice(0,4);
+const IS_STUDENT = ROOM.length === 4;
+const LS = { get:(k,d)=>{try{return localStorage.getItem(k)??d}catch{return d}}, set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}} };
+const langName = c => (CFG.langs.find(x=>x[0]===c)||[c,c])[1].split(' ')[0];
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+firebase.initializeApp(CFG.firebase);
+const db = firebase.firestore();
+const roomRef = code => db.collection('live_rooms').doc(code);
+
+/** 向後端要一把短效 client secret（老師用 PIN，學員用當日 token） */
+async function mintSecret({ pin, tok, lang }) {
+  const u = new URL(CFG.secretApi);
+  u.searchParams.set('action','live_secret'); u.searchParams.set('lang', lang);
+  if (pin) u.searchParams.set('pin', pin); if (tok) u.searchParams.set('tok', tok);
+  const r = await fetch(u, { method:'GET', redirect:'follow' });
+  const j = await r.json().catch(()=>({ error:'後端回應不是 JSON' }));
+  if (j.error) throw new Error(j.error + (j.detail ? ' — ' + j.detail : ''));
+  return j;
+}
+
+/** WebRTC 連到 Realtime Translation。回傳 {pc, dc, close} */
+async function rtConnect({ secret, stream, onEvent, onTrack, onState }) {
+  const pc = new RTCPeerConnection();
+  const dc = pc.createDataChannel('oai-events');
+  dc.onmessage = m => { let ev; try { ev = JSON.parse(m.data); } catch { return; } onEvent(ev); };
+  pc.ontrack = ev => onTrack && onTrack(ev.streams[0]);
+  pc.onconnectionstatechange = () => onState && onState(pc.connectionState);
+  for (const t of stream.getAudioTracks()) pc.addTrack(t, stream);
+  const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+  const r = await fetch(CFG.callUrl, { method:'POST', headers:{ Authorization:'Bearer '+secret, 'Content-Type':'application/sdp' }, body: offer.sdp });
+  const sdp = await r.text(); if (!r.ok) throw new Error('OpenAI 連線失敗 ' + r.status + ' ' + sdp.slice(0,200));
+  await pc.setRemoteDescription({ type:'answer', sdp });
+  return { pc, dc, close(){ try{dc.close()}catch{} try{pc.close()}catch{} } };
+}
+const evText = ev => typeof ev.delta === 'string' ? ev.delta : (typeof ev.transcript === 'string' ? ev.transcript : (typeof ev.text === 'string' ? ev.text : ''));
+const isOut = t => t.startsWith('session.output_transcript.') || t.startsWith('response.output_audio_transcript.');
+const isIn  = t => t.startsWith('session.input_transcript.') || t.startsWith('conversation.item.input_audio_transcription.');
+const isFinal = t => t.endsWith('.done') || t.endsWith('.completed');
+
+/** 累積字幕段落 + 節流寫 Firestore。每個 item_id 一則 */
+function makePublisher(room, base) {
+  const pending = new Map(); let timer = null;
+  const flush = () => { timer = null; for (const [id, d] of pending) { roomRef(room).collection('lines').doc(id).set(d, { merge:true }).catch(e => console.warn('publish', e.message)); } pending.clear(); };
+  return {
+    push(id, data, urgent) { pending.set(id, { ...base, ...(pending.get(id)||{}), ...data }); if (urgent) { if (timer) clearTimeout(timer); flush(); } else if (!timer) timer = setTimeout(flush, 700); },
+    flush
+  };
+}
+
+/* ================= 老師端 ================= */
+async function teacherMain() {
+  $('#teacher').classList.remove('hide');
+  const sel = $('#lang'); CFG.langs.filter(l=>l[0]!=='zh').forEach(([c,n]) => { const o=document.createElement('option'); o.value=c; o.textContent=n; sel.append(o); });
+  sel.value = LS.get('xbh_live_lang','en');
+  $('#pin').value = LS.get('xbh_live_pin','');
+  $('#glossary').value = LS.get('xbh_live_glossary','');
+  let room = LS.get('xbh_live_room',''); if (!/^\d{4}$/.test(room)) room = newRoomCode();
+  const link = () => location.origin + location.pathname + '?r=' + room;
+  function newRoomCode(){ const c = String(1000 + Math.floor(Math.random()*9000)); LS.set('xbh_live_room', c); return c; }
+  function renderRoom(){ $('#roomcode').textContent = room; $('#roomcode2').textContent = room; $('#roomlink').textContent = link(); $('#bigcode').textContent = room; $('#biglink').textContent = link();
+    for (const [id,size] of [['#qr',120],['#qrbig',640]]) { const el=$(id); el.innerHTML=''; try { new QRCode(el, { text: link(), width:size, height:size, correctLevel: QRCode.CorrectLevel.M }); } catch { el.textContent = link(); } } }
+  renderRoom();
+  $('#newroom').onclick = () => { room = newRoomCode(); renderRoom(); };
+  $('#showqr').onclick = $('#showqr2').onclick = () => $('#bigqr').classList.remove('hide');
+  $('#closeqr').onclick = () => $('#bigqr').classList.add('hide');
+
+  // ---- 上課狀態 ----
+  let live = false, conn = null, stream = null, audioEl = null, roomToken = null, secs = 0, meterTimer = null, reconnectTimer = null, sessionStart = 0;
+  let lang = sel.value; let pub = null; let unsubLines = null;
+  const outItems = new Map(); let inBuf = { id:null, text:'' };
+  const setStatus = (txt, cls) => { const t = $('#tstatus'); t.innerHTML = `<span class="dot ${cls||''}"></span>${txt}`; };
+  const showErr = (m) => { for (const id of ['#terr','#terr2']) { const e=$(id); e.textContent = m||''; e.classList.toggle('hide', !m); } };
+
+  async function start() {
+    showErr('');
+    const pin = $('#pin').value.trim(); lang = sel.value;
+    if (!pin) return showErr('請輸入老師 PIN');
+    LS.set('xbh_live_pin', pin); LS.set('xbh_live_lang', lang); LS.set('xbh_live_glossary', $('#glossary').value);
+    $('#start').disabled = true; $('#setupstat').textContent = '開麥克風…';
+    try {
+      stream = stream || await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true }, video:false });
+      $('#setupstat').textContent = '取得授權…';
+      const s = await mintSecret({ pin, lang });
+      roomToken = s.roomToken || null;
+      await roomRef(room).set({ status:'live', lang, token: roomToken, glossary: $('#glossary').value.slice(0,4000), startedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+      pub = makePublisher(room, { from:'t', lang });
+      $('#tsetup').classList.add('hide'); $('#tlive').classList.remove('hide');
+      $('#langlabel').textContent = langName(lang); $('#langlabel2').textContent = langName(lang);
+      live = true; listenLines();
+      await connect(s.client_secret);
+    } catch (e) { showErr(e.message); $('#start').disabled = false; $('#setupstat').textContent = ''; }
+  }
+
+  async function connect(secret) {
+    setStatus('連線中', '');
+    if (!secret) { const s = await mintSecret({ pin: $('#pin').value.trim(), lang }); secret = s.client_secret; }
+    if (conn) { conn.close(); conn = null; }
+    conn = await rtConnect({ secret, stream, onEvent: handleEvent, onTrack: st => { if (!audioEl) { audioEl = new Audio(); audioEl.autoplay = true; audioEl.playsInline = true; } audioEl.srcObject = st; audioEl.muted = !$('#spk').checked; audioEl.play().catch(()=>{}); },
+      onState: st => { if (st === 'connected') { setStatus('翻譯中', 'on'); sessionStart = Date.now(); startMeter(); } else if (['failed','disconnected','closed'].includes(st) && live) { setStatus('斷線，重連中', 'err'); stopMeter(); scheduleReconnect(); } } });
+    // Realtime 單一 session 有時間上限，58 分鐘主動換一條，避免講到一半被切
+    clearTimeout(reconnectTimer); reconnectTimer = setTimeout(() => { if (live) { setStatus('換線中', ''); connect().catch(e => showErr(e.message)); } }, 58*60*1000);
+  }
+  let reconnecting = false;
+  function scheduleReconnect(){ if (reconnecting || !live) return; reconnecting = true; setTimeout(async () => { try { await connect(); showErr(''); } catch (e) { showErr('重連失敗：' + e.message + '，10 秒後再試'); setTimeout(() => { reconnecting = false; scheduleReconnect(); }, 10000); return; } reconnecting = false; }, 1500); }
+
+  function handleEvent(ev) {
+    const t = ev.type || '';
+    if (t === 'error') { showErr('OpenAI: ' + JSON.stringify(ev.error || ev).slice(0,300)); return; }
+    const txt = evText(ev);
+    if (isOut(t)) {
+      const id = ev.item_id || ev.response_id || ('o' + (outItems.size));
+      let it = outItems.get(id); if (!it) { it = { id: 't_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), text:'', seq: Date.now(), el:null }; outItems.set(id, it); }
+      if (isFinal(t)) { if (txt) it.text = txt; it.done = true; } else it.text += txt;
+      renderOut(it); pub.push(it.id, { t: it.text, done: !!it.done, seq: it.seq }, !!it.done);
+      if (it.done) outItems.delete(id);
+    } else if (isIn(t) && $('#showin').checked) {
+      if (isFinal(t)) { if (txt) inBuf.text = txt; inBuf.done = true; } else inBuf.text += txt;
+      renderIn();
+      if (inBuf.done) inBuf = { id:null, text:'' };
+    }
+  }
+  function renderOut(it) {
+    const feed = $('#ofeed');
+    if (!it.el) { it.el = document.createElement('p'); it.el.className = 'out live'; feed.append(it.el); }
+    it.el.textContent = it.text; if (it.done) it.el.classList.remove('live');
+    while (feed.children.length > 60) feed.firstChild.remove();
+    feed.scrollTop = feed.scrollHeight;
+  }
+  function renderIn() {
+    const feed = $('#ofeed'); let el = feed.querySelector('.zh.live');
+    if (!el) { el = document.createElement('span'); el.className = 'zh live'; feed.append(el); }
+    el.textContent = '你說：' + inBuf.text; if (inBuf.done) el.classList.remove('live'); feed.scrollTop = feed.scrollHeight;
+  }
+  const qEls = new Map();
+  function listenLines() {
+    if (unsubLines) unsubLines();
+    unsubLines = roomRef(room).collection('lines').orderBy('seq').limitToLast(60).onSnapshot(snap => {
+      snap.docChanges().forEach(ch => {
+        const d = ch.doc.data(); if (d.from !== 's') return; if (ch.type === 'removed') { qEls.get(ch.doc.id)?.remove(); qEls.delete(ch.doc.id); return; }
+        let el = qEls.get(ch.doc.id); const feed = $('#qfeed');
+        if (!el) { feed.querySelector('.waiting')?.remove(); el = document.createElement('div'); el.className = 'q'; feed.append(el); qEls.set(ch.doc.id, el); }
+        el.classList.toggle('live', !d.done);
+        el.innerHTML = `<div class="who">${esc(d.name||'學員')}</div><div class="zh">${esc(d.t||'')}</div>` + (d.src ? `<div class="src">${esc(d.src)}</div>` : '');
+        feed.scrollTop = feed.scrollHeight;
+      });
+      $('#qcount').textContent = qEls.size;
+    }, e => showErr('Firestore: ' + e.message));
+    // 線上學員數（心跳）
+    roomRef(room).collection('presence').onSnapshot(s => { const n = s.docs.filter(d => (Date.now() - (d.data().t||0)) < 90000).length; $('#stucount').textContent = n ? `${n} 位學員在線` : ''; }, ()=>{});
+  }
+  function startMeter(){ stopMeter(); meterTimer = setInterval(() => { secs++; const m = secs/60; $('#meter').textContent = `${Math.floor(m)} 分 · 約 NT$${Math.round(m*CFG.usdPerMin*CFG.twd)}`; }, 1000); }
+  function stopMeter(){ if (meterTimer) clearInterval(meterTimer); meterTimer = null; }
+
+  $('#start').onclick = start;
+  $('#spk').onchange = () => { if (audioEl) audioEl.muted = !$('#spk').checked; };
+  $('#pause').onclick = async () => {
+    if (live) { live = false; clearTimeout(reconnectTimer); conn?.close(); conn = null; stopMeter(); setStatus('暫停中（不計費）', ''); $('#pause').textContent = '繼續上課'; await roomRef(room).set({ status:'paused', updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true }); }
+    else { $('#pause').textContent = '暫停（下課休息）'; live = true; await roomRef(room).set({ status:'live', updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true }); connect().catch(e => showErr(e.message)); }
+  };
+  $('#end').onclick = async () => {
+    if (!confirm('結束這堂課的翻譯？')) return;
+    live = false; clearTimeout(reconnectTimer); conn?.close(); conn = null; stopMeter(); stream?.getTracks().forEach(t=>t.stop()); stream = null;
+    await roomRef(room).set({ status:'ended', updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+    location.reload();
+  };
+  window.addEventListener('beforeunload', () => { if (live) { conn?.close(); } });
+}
+
+/* ================= 學員端 ================= */
+async function studentMain() {
+  $('#student').classList.remove('hide');
+  $('#jroom').textContent = ROOM;
+  $('#sname').value = LS.get('xbh_live_name','');
+  const showErr = m => { const e = $('#serr'); e.textContent = m||''; e.classList.toggle('hide', !m); };
+  let name = '', roomData = null, unsub = null, unsubLines = null;
+  const lineEls = new Map(); const spoken = new Set(); let ttsQueue = [];
+
+  $('#join').onclick = async () => {
+    name = $('#sname').value.trim().slice(0,30); if (!name) return showErr('Please enter your name');
+    LS.set('xbh_live_name', name);
+    $('#sjoin').classList.add('hide'); $('#slive').classList.remove('hide');
+    unsub = roomRef(ROOM).onSnapshot(d => { roomData = d.data() || null; renderRoom(); }, e => showErr('Firestore: ' + e.message));
+    unsubLines = roomRef(ROOM).collection('lines').orderBy('seq').limitToLast(50).onSnapshot(snap => snap.docChanges().forEach(renderLine), e => console.warn(e));
+    heartbeat(); setInterval(heartbeat, 45000);
+  };
+  const presId = 'p_' + Math.random().toString(36).slice(2,10);
+  function heartbeat(){ roomRef(ROOM).collection('presence').doc(presId).set({ name, t: Date.now() }).catch(()=>{}); }
+
+  function renderRoom() {
+    const st = $('#sstatus'); const s = roomData?.status;
+    st.className = 'tag ' + (s==='live'?'live':(s==='paused'?'wait':'off'));
+    st.textContent = s==='live' ? 'LIVE · ' + langName(roomData.lang||'en') : (s==='paused' ? 'break' : (s==='ended' ? 'ended' : 'waiting'));
+    $('#swait').classList.toggle('hide', s==='live' || s==='paused' || lineEls.size>0);
+    const g = (roomData?.glossary||'').trim(); $('#gbox').classList.toggle('hide', !g); $('#gtext').textContent = g;
+    $('#ptt').disabled = !(s==='live' && roomData?.token);
+  }
+  function renderLine(ch) {
+    const d = ch.doc.data(); const feed = $('#feed');
+    if (ch.type === 'removed') { lineEls.get(ch.doc.id)?.remove(); lineEls.delete(ch.doc.id); return; }
+    let el = lineEls.get(ch.doc.id);
+    if (!el) { el = document.createElement('p'); feed.append(el); lineEls.set(ch.doc.id, el); $('#swait').classList.add('hide'); }
+    if (d.from === 's') {
+      const mine = d.name === name && d.mine === presId;
+      el.className = 'ln ' + (mine ? 'me' : 'peer');
+      el.innerHTML = `<span class="who">${mine ? 'You' : esc(d.name||'')} asked</span>${esc(d.src||'')}` + (mine && d.t ? `<span class="zh">→ ${esc(d.t)}</span>` : '');
+    } else {
+      el.className = 'ln' + (d.done ? '' : ' live'); el.textContent = d.t || '';
+      if (d.done && $('#tts').checked && !spoken.has(ch.doc.id) && (Date.now() - (d.seq||0)) < 30000) { spoken.add(ch.doc.id); speak(d.t, d.lang); }
+    }
+    // 舊字幕變淡
+    const teacherLines = [...feed.querySelectorAll('.ln:not(.me):not(.peer)')];
+    teacherLines.forEach((p,i) => p.classList.toggle('old', i < teacherLines.length - 2));
+    while (feed.children.length > 80) { const f = feed.firstChild; if (f.id === 'swait') break; f.remove(); }
+    feed.scrollTop = feed.scrollHeight;
+  }
+  function speak(text, lang) { if (!('speechSynthesis' in window) || !text) return; const u = new SpeechSynthesisUtterance(text); u.lang = ({en:'en-US',ja:'ja-JP',ko:'ko-KR',fr:'fr-FR',de:'de-DE',es:'es-ES',pt:'pt-BR',it:'it-IT',id:'id-ID',vi:'vi-VN',hi:'hi-IN',ru:'ru-RU',zh:'zh-TW'})[lang||'en'] || 'en-US'; u.rate = 1.02; speechSynthesis.speak(u); }
+  $('#tts').onchange = () => { if ($('#tts').checked) speak(' ', roomData?.lang); else speechSynthesis.cancel(); };
+  $('#big').onchange = () => document.documentElement.style.fontSize = $('#big').checked ? '120%' : '';
+
+  // ---- 按住說話（學員 → 中文）----
+  let sConn = null, sStream = null, sPub = null, cur = null, idleTimer = null, connecting = false;
+  const ptt = $('#ptt');
+  const setPtt = (cls, txt) => { ptt.className = cls; ptt.textContent = txt; };
+  async function ensureSession() {
+    if (sConn) return; if (connecting) return; connecting = true;
+    try {
+      setPtt('wait', 'Connecting…');
+      sStream = sStream || await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true }, video:false });
+      sStream.getAudioTracks().forEach(t => t.enabled = false);
+      const s = await mintSecret({ tok: roomData.token, lang: 'zh' });
+      sPub = sPub || makePublisher(ROOM, { from:'s', name, mine: presId });
+      sConn = await rtConnect({ secret: s.client_secret, stream: sStream, onEvent: handleEvent, onTrack: ()=>{}, onState: st => { if (['failed','closed','disconnected'].includes(st)) { sConn = null; if (!holding) setPtt('', '🎤 Hold to speak (English)'); } } });
+    } finally { connecting = false; }
+  }
+  function handleEvent(ev) {
+    const t = ev.type || ''; if (t === 'error') { showErr('OpenAI: ' + JSON.stringify(ev.error||ev).slice(0,200)); return; }
+    if (!cur) return; const txt = evText(ev);
+    if (isOut(t)) { if (isFinal(t)) { if (txt) cur.t = txt; } else cur.t += txt; }
+    else if (isIn(t)) { if (isFinal(t)) { if (txt) cur.src = txt; } else cur.src += txt; }
+    else return;
+    sPub.push(cur.id, { t: cur.t, src: cur.src, seq: cur.seq, done: false }, false);
+    clearTimeout(cur.finTimer); cur.finTimer = setTimeout(() => finalize(cur), holding ? 8000 : 2500);
+  }
+  function finalize(c) { if (!c || c.finalized) return; c.finalized = true; sPub.push(c.id, { t: c.t, src: c.src, seq: c.seq, done: true }, true); if (cur === c) cur = null; }
+  let holding = false;
+  async function down(e) { e.preventDefault(); if (ptt.disabled || holding) return; holding = true; showErr(''); try { ptt.setPointerCapture(e.pointerId); } catch {}
+    try { await ensureSession(); } catch (err) { holding = false; setPtt('', '🎤 Hold to speak (English)'); showErr(err.message); return; }
+    if (!holding) return;
+    clearTimeout(idleTimer);
+    if (cur) finalize(cur);
+    cur = { id: 's_' + Date.now(), t:'', src:'', seq: Date.now() };
+    sStream.getAudioTracks().forEach(t => t.enabled = true); setPtt('on', '● Listening… release when done'); }
+  function up(e) { if (e) e.preventDefault(); if (!holding) return; holding = false;
+    sStream?.getAudioTracks().forEach(t => t.enabled = false); setPtt('', '🎤 Hold to speak (English)');
+    if (cur) { clearTimeout(cur.finTimer); cur.finTimer = setTimeout(() => finalize(cur), 3000); }
+    // 放開 75 秒沒再按就把 session 收掉（省錢）
+    clearTimeout(idleTimer); idleTimer = setTimeout(() => { sConn?.close(); sConn = null; }, 75000); }
+  ptt.addEventListener('pointerdown', down); ptt.addEventListener('pointerup', up); ptt.addEventListener('pointercancel', up); ptt.addEventListener('pointerleave', e => { if (holding) up(e); });
+  ptt.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+(IS_STUDENT ? studentMain() : teacherMain()).catch(e => { document.body.insertAdjacentHTML('afterbegin', `<div class="err">${esc(e.message)}</div>`); });
+</script>
+</body>
+</html>
