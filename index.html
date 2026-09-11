@@ -90,6 +90,7 @@ input,select,textarea{font:inherit;border:1.5px solid var(--line);border-radius:
     <p>你講中文，學員手機上看到翻譯字幕；學員按住講話，你這裡看到中文。</p>
     <div class="row"><label>教室代碼</label><span class="roomcode" id="roomcode">----</span><button class="ghost" id="newroom">換一組</button></div>
     <div class="row"><label>翻成</label><select id="lang"></select></div>
+    <div class="row" id="apirow"><label>後端網址</label><input id="api" placeholder="Apps Script 網頁應用程式 /exec 網址（Firebase 版免填）" autocomplete="off"></div>
     <div class="row"><label>老師 PIN</label><input id="pin" type="password" inputmode="numeric" placeholder="老師才有的 PIN" autocomplete="off"></div>
     <div class="row"><label>本堂詞彙</label><textarea id="glossary" rows="3" placeholder="給學員看的中英對照，一行一個，例如：&#10;永生花 = preserved flower&#10;熱熔槍 = hot glue gun" style="flex:1"></textarea></div>
     <div class="qrwrap"><div id="qr"></div><div><div class="link" id="roomlink"></div><div style="margin-top:8px"><button class="ghost" id="showqr">放大 QR 給學員掃</button></div></div></div>
@@ -148,7 +149,9 @@ input,select,textarea{font:inherit;border:1.5px solid var(--line);border-radius:
 const CFG = {
   firebase: { apiKey:"AIzaSyB99DpIA1dNr-e2NUfXzAkk-lVoi_yxbvg", authDomain:"xiabenhowdata.firebaseapp.com", projectId:"xiabenhowdata", appId:"1:1069329462202:web:48c6ca6ac786f9c8cca383" },
   // 發 client secret 的後端（Apps Script 網頁應用程式，OpenAI 金鑰放在那邊，不在這頁）
-  secretApi: "https://script.google.com/macros/s/AKfycby_GHvO1yWltJuFKQUvfBLo7mzjhodFdr_xUh8G9W_BMmz3MWjkUye7LninGXzl3ryn/exec",
+  // 在 Firebase Hosting 上走同站 /api/secret（Cloud Function）；在 GitHub Pages / 本機則打 Apps Script 網頁應用程式
+  onFirebase: !/github\.io$|^localhost$|^127\.|^$/.test(location.hostname),
+  get secretApi() { return this.onFirebase ? location.origin + "/api/secret" : LS.get('xbh_live_api', ''); },
   callUrl: "https://api.openai.com/v1/realtime/translations/calls",
   usdPerMin: 0.034, twd: 32,
   langs: [["en","English 英文"],["ja","日本語 日文"],["ko","한국어 韓文"],["fr","Français 法文"],["de","Deutsch 德文"],["es","Español 西班牙文"],["pt","Português 葡萄牙文"],["it","Italiano 義大利文"],["id","Bahasa Indonesia 印尼文"],["vi","Tiếng Việt 越南文"],["hi","हिन्दी 印地文"],["ru","Русский 俄文"],["zh","中文"]],
@@ -166,8 +169,9 @@ const db = firebase.firestore();
 const roomRef = code => db.collection('live_rooms').doc(code);
 
 /** 向後端要一把短效 client secret（老師用 PIN，學員用當日 token） */
-async function mintSecret({ pin, tok, lang }) {
-  const u = new URL(CFG.secretApi);
+async function mintSecret({ pin, tok, lang, api }) {
+  const base = api || CFG.secretApi; if (!base) throw new Error('還沒設定後端網址（老師端設定頁填入）');
+  const u = new URL(base);
   u.searchParams.set('action','live_secret'); u.searchParams.set('lang', lang);
   if (pin) u.searchParams.set('pin', pin); if (tok) u.searchParams.set('tok', tok);
   const r = await fetch(u, { method:'GET', redirect:'follow' });
@@ -211,6 +215,7 @@ async function teacherMain() {
   const sel = $('#lang'); CFG.langs.filter(l=>l[0]!=='zh').forEach(([c,n]) => { const o=document.createElement('option'); o.value=c; o.textContent=n; sel.append(o); });
   sel.value = LS.get('xbh_live_lang','en');
   $('#pin').value = LS.get('xbh_live_pin','');
+  $('#api').value = LS.get('xbh_live_api',''); $('#apirow').classList.toggle('hide', CFG.onFirebase);
   $('#glossary').value = LS.get('xbh_live_glossary','');
   let room = LS.get('xbh_live_room',''); if (!/^\d{4}$/.test(room)) room = newRoomCode();
   const link = () => location.origin + location.pathname + '?r=' + room;
@@ -233,14 +238,14 @@ async function teacherMain() {
     showErr('');
     const pin = $('#pin').value.trim(); lang = sel.value;
     if (!pin) return showErr('請輸入老師 PIN');
-    LS.set('xbh_live_pin', pin); LS.set('xbh_live_lang', lang); LS.set('xbh_live_glossary', $('#glossary').value);
+    LS.set('xbh_live_pin', pin); LS.set('xbh_live_lang', lang); LS.set('xbh_live_glossary', $('#glossary').value); LS.set('xbh_live_api', $('#api').value.trim());
     $('#start').disabled = true; $('#setupstat').textContent = '開麥克風…';
     try {
       stream = stream || await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true }, video:false });
       $('#setupstat').textContent = '取得授權…';
       const s = await mintSecret({ pin, lang });
       roomToken = s.roomToken || null;
-      await roomRef(room).set({ status:'live', lang, token: roomToken, glossary: $('#glossary').value.slice(0,4000), startedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+      await roomRef(room).set({ status:'live', lang, token: roomToken, api: CFG.secretApi, glossary: $('#glossary').value.slice(0,4000), startedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
       pub = makePublisher(room, { from:'t', lang });
       $('#tsetup').classList.add('hide'); $('#tlive').classList.remove('hide');
       $('#langlabel').textContent = langName(lang); $('#langlabel2').textContent = langName(lang);
@@ -385,7 +390,7 @@ async function studentMain() {
       setPtt('wait', 'Connecting…');
       sStream = sStream || await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true }, video:false });
       sStream.getAudioTracks().forEach(t => t.enabled = false);
-      const s = await mintSecret({ tok: roomData.token, lang: 'zh' });
+      const s = await mintSecret({ tok: roomData.token, lang: 'zh', api: roomData.api });
       sPub = sPub || makePublisher(ROOM, { from:'s', name, mine: presId });
       sConn = await rtConnect({ secret: s.client_secret, stream: sStream, onEvent: handleEvent, onTrack: ()=>{}, onState: st => { if (['failed','closed','disconnected'].includes(st)) { sConn = null; if (!holding) setPtt('', '🎤 Hold to speak (English)'); } } });
     } finally { connecting = false; }

@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 備課表：所有人可讀可寫，但擋掉「內容被清空／異常縮水」這種誤觸
+    match /content/{docId} {
+      allow read: if true;
+      allow write: if request.resource.data.json is string
+                   && request.resource.data.json.size() > 3000
+                   && request.resource.data.json.size() < 900000
+                   && request.resource.data.updatedBy is string;
+    }
+
+    // 版本紀錄：每次儲存自動留一份完整備份，可讀可新增，但不能改也不能刪
+    match /history/{docId} {
+      allow read: if true;
+      allow create: if request.resource.data.json is string
+                    && request.resource.data.json.size() > 3000
+                    && request.resource.data.json.size() < 900000;
+      allow update, delete: if false;
+    }
+
+    // 備課表照片／備註（v2 編輯頁 /prep2/）：每堂課一份，獨立於本體，舊介面不會動到
+    match /prep_extra/{docId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.updatedBy is string
+                    && (!('photo' in request.resource.data) || request.resource.data.photo == null
+                        || (request.resource.data.photo is string && request.resource.data.photo.size() < 950000))
+                    && (!('note' in request.resource.data)
+                        || (request.resource.data.note is string && request.resource.data.note.size() < 5000))
+                    && (!('thumb' in request.resource.data) || request.resource.data.thumb == null
+                        || (request.resource.data.thumb is string && request.resource.data.thumb.size() < 80000));
+      allow delete: if true;
+    }
+
+    // 備課表照片本體（一張一份，prep_extra.photos 存順序），點開課程才載入
+    match /prep_photo/{docId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.key is string
+                    && request.resource.data.data is string
+                    && request.resource.data.data.size() < 950000;
+      allow delete: if true;
+    }
+
+
+    // 上課即時翻譯（/live/）：教室文件 + 字幕列 + 在線心跳，公開可讀寫，限制欄位大小
+    match /live_rooms/{room} {
+      allow read: if true;
+      allow create, update: if request.resource.data.status is string
+                    && (!('glossary' in request.resource.data) || (request.resource.data.glossary is string && request.resource.data.glossary.size() < 4100))
+                    && (!('token' in request.resource.data) || request.resource.data.token == null || (request.resource.data.token is string && request.resource.data.token.size() < 64))
+                    && (!('api' in request.resource.data) || (request.resource.data.api is string && request.resource.data.api.size() < 300));
+      allow delete: if false;
+      match /lines/{line} {
+        allow read: if true;
+        allow create, update: if request.resource.data.t is string && request.resource.data.t.size() < 4000
+                      && (!('src' in request.resource.data) || (request.resource.data.src is string && request.resource.data.src.size() < 4000))
+                      && (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() < 40));
+        allow delete: if true;
+      }
+      match /presence/{p} {
+        allow read: if true;
+        allow write: if request.resource == null || (request.resource.data.name is string && request.resource.data.name.size() < 40);
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
