@@ -224,6 +224,20 @@ const LS = { get:(k,d)=>{try{return localStorage.getItem(k)??d}catch{return d}},
 const langName = c => (CFG.langs.find(x=>x[0]===c)||[c,c])[1].split(' ')[0];
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 // 模型吐的中文是簡體（whisper／翻譯輸出都是），全部轉成台灣繁體用語
+// 瀏覽器內建語音（免費）：免費模式老師端喇叭、學員端 🎧 Voice 都用這個
+const TTS_LANG = {en:'en-US',ja:'ja-JP',ko:'ko-KR',fr:'fr-FR',de:'de-DE',es:'es-ES',pt:'pt-BR',it:'it-IT',id:'id-ID',vi:'vi-VN',hi:'hi-IN',ru:'ru-RU',zh:'zh-TW'};
+function speakText(text, lang) {
+  if (!('speechSynthesis' in window) || !text) return;
+  const code = TTS_LANG[lang||'en'] || 'en-US';
+  // 積太多就跳過舊的，免得越唸越落後
+  if (speechSynthesis.pending && speechSynthesis.speaking) { speechSynthesis.cancel(); }
+  const u = new SpeechSynthesisUtterance(text); u.lang = code; u.rate = 1.05;
+  const voices = speechSynthesis.getVoices().filter(v => v.lang.replace('_','-').toLowerCase().startsWith(code.slice(0,2)));
+  const pref = voices.find(v => /Google|Samantha|Siri|Natural|Premium|Enhanced/i.test(v.name) && v.lang.replace('_','-').toLowerCase() === code.toLowerCase()) || voices.find(v => v.lang.replace('_','-').toLowerCase() === code.toLowerCase()) || voices[0];
+  if (pref) u.voice = pref;
+  speechSynthesis.speak(u);
+}
+if ('speechSynthesis' in window) speechSynthesis.getVoices();
 let _tw = null; const toTW = s => { try { _tw = _tw || window.OpenCC.Converter({ from:'cn', to:'twp' }); return _tw(String(s||'')); } catch { return String(s||''); } };
 
 firebase.initializeApp(CFG.firebase);
@@ -352,7 +366,7 @@ async function teacherMain() {
       pub = makePublisher(room, { from:'t', lang });
       $('#tsetup').classList.add('hide'); $('#tlive').classList.remove('hide');
       $('#langlabel').textContent = langName(lang); $('#langlabel2').textContent = langName(lang);
-      $('#spk').closest('label').classList.add('hide'); $('#meter').textContent = '免費模式 · NT$0';
+      $('#spk').closest('label').classList.remove('hide'); $('#meter').textContent = '免費模式 · NT$0';
       live = true; listenLines(); startRec();
     } catch (e) { showErr(e.message); $('#start').disabled = false; $('#setupstat').textContent = ''; }
   }
@@ -405,7 +419,7 @@ async function teacherMain() {
   let curOut = null, curIn = null;
   const SENT_END = /[.!?。！？](["'”’)]*)\s*$/;
   function newOut() { return { id: 't_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), text:'', seq: Date.now(), el:null, done:false }; }
-  function finishOut(it) { if (!it || it.done) return; clearTimeout(it.timer); it.done = true; it.text = it.text.trim(); renderOut(it); if (it.text) pub.push(it.id, { t: it.text, done: true, seq: it.seq }, true); if (curOut === it) curOut = null; }
+  function finishOut(it) { if (!it || it.done) return; clearTimeout(it.timer); it.done = true; it.text = it.text.trim(); renderOut(it); if (it.text) pub.push(it.id, { t: it.text, done: true, seq: it.seq }, true); if (engine === 'free' && $('#spk').checked && it.text && !it.text.startsWith('(翻譯失敗')) speakText(it.text, lang); if (curOut === it) curOut = null; }
   function handleEvent(ev) {
     const t = ev.type || '';
     if (t === 'error') { showErr('OpenAI: ' + JSON.stringify(ev.error || ev).slice(0,300)); return; }
@@ -462,7 +476,7 @@ async function teacherMain() {
   function stopMeter(){ if (meterTimer) clearInterval(meterTimer); meterTimer = null; }
 
   $('#start').onclick = start;
-  $('#spk').onchange = () => { if (audioEl) audioEl.muted = !$('#spk').checked; };
+  $('#spk').onchange = () => { if (audioEl) audioEl.muted = !$('#spk').checked; if (engine === 'free') { if ($('#spk').checked) speakText(' ', lang); else speechSynthesis.cancel(); } };
   $('#pause').onclick = async () => {
     if (live) { live = false; clearTimeout(reconnectTimer); conn?.close(); conn = null; stopRec(); stopMeter(); setStatus('暫停中（不計費）', ''); $('#pause').textContent = '▶ 繼續上課'; await roomRef(room).set({ status:'paused', updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true }); }
     else { $('#pause').textContent = '⏸ 暫停'; live = true; await roomRef(room).set({ status:'live', updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true }); if (engine === 'free') startRec(); else connect().catch(e => showErr(e.message)); }
@@ -524,7 +538,7 @@ async function studentMain() {
     while (feed.children.length > 80) { const f = feed.firstChild; if (f.id === 'swait') break; f.remove(); }
     feed.scrollTop = feed.scrollHeight;
   }
-  function speak(text, lang) { if (!('speechSynthesis' in window) || !text) return; const u = new SpeechSynthesisUtterance(text); u.lang = ({en:'en-US',ja:'ja-JP',ko:'ko-KR',fr:'fr-FR',de:'de-DE',es:'es-ES',pt:'pt-BR',it:'it-IT',id:'id-ID',vi:'vi-VN',hi:'hi-IN',ru:'ru-RU',zh:'zh-TW'})[lang||'en'] || 'en-US'; u.rate = 1.02; speechSynthesis.speak(u); }
+  const speak = speakText;
   $('#tts').onchange = () => { if ($('#tts').checked) speak(' ', roomData?.lang); else speechSynthesis.cancel(); };
   $('#big').onchange = () => document.documentElement.style.fontSize = $('#big').checked ? '120%' : '';
 
