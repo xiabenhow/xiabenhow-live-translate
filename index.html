@@ -163,6 +163,7 @@ body.screen .ln.me,body.screen .ln.peer{font-size:3vw;background:#222;color:#ddd
       <div class="ctl">
         <label class="toggle"><input type="checkbox" id="spk"> 🔊 喇叭播語音</label>
         <label class="toggle"><input type="checkbox" id="showin" checked> 顯示我的中文</label>
+        <span class="stat hide" id="microw" title="麥克風有收到聲音時會亮"><span class="dot" id="micdot"></span>收音</span>
         <label class="toggle hide" id="endprow">斷句 <select id="endp" style="padding:4px 8px;font-size:14px;border-radius:8px"><option value="fast">快</option><option value="normal">中</option><option value="slow">慢</option></select></label>
         <button class="ghost" id="showqr2">▣ QR</button>
         <button id="pause">⏸ 暫停</button>
@@ -367,7 +368,7 @@ async function teacherMain() {
       pub = makePublisher(room, { from:'t', lang });
       $('#tsetup').classList.add('hide'); $('#tlive').classList.remove('hide');
       $('#langlabel').textContent = langName(lang); $('#langlabel2').textContent = langName(lang);
-      $('#spk').closest('label').classList.remove('hide'); $('#meter').textContent = '免費模式 · NT$0'; $('#endprow').classList.remove('hide'); $('#endp').value = endpMode; $('#endp').onchange = () => { endpMode = $('#endp').value; LS.set('xbh_live_endp', endpMode); };
+      $('#spk').closest('label').classList.remove('hide'); $('#meter').textContent = '免費模式 · NT$0'; $('#endprow').classList.remove('hide'); $('#microw').classList.remove('hide'); $('#endp').value = endpMode; $('#endp').onchange = () => { endpMode = $('#endp').value; LS.set('xbh_live_endp', endpMode); };
       live = true; listenLines(); startRec();
     } catch (e) { showErr(e.message); $('#start').disabled = false; $('#setupstat').textContent = ''; }
   }
@@ -398,8 +399,8 @@ async function teacherMain() {
       vadCtl = await vad.MicVAD.new({
         onnxWASMBasePath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/', baseAssetPath: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/',
         positiveSpeechThreshold: 0.6, negativeSpeechThreshold: 0.35, redemptionMs: 220, minSpeechMs: 150, preSpeechPadMs: 100,
-        onSpeechStart: () => { speaking = true; clearTimeout(commitTimer); commitTimer = null; },
-        onSpeechEnd: () => { speaking = false; if (segInterim.trim()) scheduleCommit(vadDelay(segInterim.trim())); },
+        onSpeechStart: () => { speaking = true; $('#micdot').classList.add('on'); clearTimeout(commitTimer); commitTimer = null; },
+        onSpeechEnd: () => { speaking = false; $('#micdot').classList.remove('on'); if (segInterim.trim()) scheduleCommit(vadDelay(segInterim.trim())); },
       });
       vadCtl.start();
     } catch (e) { console.warn('VAD 不可用，退回 Chrome 內建斷句', e.message); vadCtl = null; }
@@ -409,12 +410,39 @@ async function teacherMain() {
     const add = (src) => new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = rej; document.head.append(el); });
     add('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.wasm.min.js').then(() => add('https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/bundle.min.js')).then(startVad).catch(e => console.warn('VAD 載入失敗', e));
   }
+  /* ---- 辨識器生命週期：Chrome 的 SpeechRecognition 會無預警停掉（網路、靜音太久、內部卡死）
+   * 對策：每次重啟都 new 一個新物件；onend 立刻重啟（失敗就退避重試）；看門狗每 3 秒檢查一次：
+   * VAD 說有人在講話但辨識 8 秒沒任何回應 → 強制砍掉重建；閒置時每 4 分鐘主動換一個新辨識器 ---- */
+  let srEvTs = 0, srStartTs = 0, srRestarts = 0, srBackoff = 300, wdTimer = null, srGen = 0, srErrCount = 0, srLastErr = '';
+  function srStatus(extra) { setStatus('翻譯中（免費）' + (extra ? ' · ' + extra : ''), 'on'); }
+  function restartRec(reason) {
+    if (!recWanted || !live) return;
+    console.warn('SR restart:', reason);
+    if (segInterim.trim()) commitSegment('restart');   // 手上還有沒定稿的字先切出去
+    const old = rec; rec = null; try { old && (old.onend = null, old.onerror = null, old.onresult = null, old.abort()); } catch {}
+    setTimeout(() => { if (recWanted && live && !rec) startRec(); }, srBackoff);
+    srBackoff = Math.min(srBackoff * 2, 5000);
+  }
+  function startWatchdog() {
+    clearInterval(wdTimer);
+    wdTimer = setInterval(() => {
+      if (!recWanted || !live) return;
+      const now = Date.now();
+      if (!rec) { restartRec('沒有辨識器'); return; }
+      if (speaking && now - srEvTs > 8000 && now - srStartTs > 8000) { restartRec('有聲音但辨識沒反應'); return; }
+      if (!speaking && !segInterim.trim() && now - srStartTs > 240000) { restartRec('定期換新'); return; }
+    }, 3000);
+  }
   function startRec() {
-    recWanted = true; loadVad();
+    recWanted = true; if (!params.get('novad')) loadVad(); startWatchdog();
+    const gen = ++srGen;
     rec = new SR(); rec.lang = 'zh-TW'; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
     let lastPreview = 0;
-    rec.onstart = () => setStatus('翻譯中（免費）', 'on');
+    srStartTs = Date.now(); srEvTs = Date.now();
+    rec.onstart = () => { if (params.get('debug')) console.log('XBH start'); srBackoff = 300; srErrCount = 0; srStatus(srRestarts ? `已自動修復 ${srRestarts} 次` : ''); };
+    rec.onaudiostart = rec.onsoundstart = rec.onspeechstart = () => { srEvTs = Date.now(); };
     rec.onresult = (ev) => {
+      srEvTs = Date.now(); if (params.get('debug')) console.log('XBH result', ev.results.length, ev.results[ev.results.length-1][0].transcript.slice(0,40), ev.results[ev.results.length-1].isFinal);
       const last = ev.results.length - 1; let interimFull = '';
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         const r = ev.results[i]; const txt = r[0].transcript.trim(); if (!txt) continue;
@@ -432,6 +460,7 @@ async function teacherMain() {
         if (!freeCur) freeCur = newOut();
         if (rest.length > 45 && !speaking) scheduleCommit(200);                       // 講不停：先切一段
         else if (!speaking || !vadCtl) scheduleCommit(vadCtl ? vadDelay(rest) : 900);  // 停頓中還有字進來：依句尾語氣決定等多久；沒 VAD 就 900ms
+        else scheduleCommit(1800);   // VAD 還覺得在講（可能是背景噪音）：文字 1.8 秒沒變就照切，避免卡住
         // 預覽只翻連續兩次都相同的前綴，畫面才不會跳
         let stable = 0; while (stable < rest.length && stable < prevInterim.length && rest[stable] === prevInterim[stable]) stable++;
         prevInterim = rest;
@@ -440,11 +469,24 @@ async function teacherMain() {
         if (pv && now - lastPreview > 500) { lastPreview = now; const it = freeCur; trOut.translate(pv).then(t => { if (freeCur === it && !it.done) { it.text = t; renderOut(it); pub.push(it.id, { t: it.text, done: false, seq: it.seq }, false); } }).catch(()=>{}); }
       }
     };
-    rec.onerror = (e) => { if (e.error === 'not-allowed') { showErr('麥克風被拒絕，請允許瀏覽器使用麥克風'); recWanted = false; } else if (e.error !== 'no-speech' && e.error !== 'aborted') console.warn('SR', e.error); };
-    rec.onend = () => { if (recWanted && live) { try { rec.start(); } catch { setTimeout(() => { try { rec.start(); } catch {} }, 500); } } else setStatus(live ? '翻譯中（免費）' : '暫停中', live ? 'on' : ''); };
+    rec.onerror = (e) => {
+      const k = e.error; srLastErr = k; if (params.get('debug')) console.log('XBH error', k);
+      if (k === 'not-allowed' || k === 'service-not-allowed') { showErr('麥克風被拒絕，請允許瀏覽器使用麥克風後按「繼續上課」'); recWanted = false; setStatus('麥克風被拒絕', 'err'); return; }
+      if (k === 'audio-capture') { showErr('抓不到麥克風（被別的程式佔用？）— 5 秒後重試'); setStatus('沒有麥克風', 'err'); return; }
+      if (k === 'network') { srErrCount++; setStatus('辨識連不上 Google，重試中…', 'err'); if (srErrCount >= 5) showErr('Chrome 語音辨識連不上 Google（免費模式要能連上 Google 服務），請檢查網路，或改用專業模式'); return; }
+      if (k !== 'no-speech' && k !== 'aborted') console.warn('SR error', k);
+    };
+    rec.onend = () => {
+      if (params.get('debug')) console.log('XBH end gen', gen, 'cur', srGen);
+      if (gen !== srGen) return;                 // 舊的辨識器，忽略
+      rec = null;
+      if (segInterim.trim()) { commitSegment('end'); segDone = ''; segIdx = -1; }   // 結束前手上的字先切出去
+      if (recWanted && live) { if (srLastErr && srLastErr !== 'no-speech' && srLastErr !== 'aborted') srRestarts++; srLastErr = ''; setTimeout(() => { if (recWanted && live && !rec) startRec(); }, srErrCount ? Math.min(1000 * srErrCount, 5000) : 150); }
+      else setStatus(live ? '翻譯中（免費）' : '暫停中', live ? 'on' : '');
+    };
     try { rec.start(); } catch (e) { showErr('語音辨識啟動失敗：' + e.message); }
   }
-  function stopRec() { recWanted = false; try { rec?.stop(); } catch {} try { vadCtl?.pause(); } catch {} clearTimeout(commitTimer); }
+  function stopRec() { recWanted = false; clearInterval(wdTimer); srGen++; try { rec?.stop(); } catch {} rec = null; try { vadCtl?.pause(); } catch {} clearTimeout(commitTimer); }
   // 學員在免費模式只送英文原文，老師端負責翻成中文寫回去
   async function translateStudentLine(id, d) {
     if (!trIn || d.t || !d.src || d.tBy) return;
