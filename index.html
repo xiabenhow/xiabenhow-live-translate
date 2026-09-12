@@ -230,7 +230,6 @@ async function teacherMain() {
   // ---- 上課狀態 ----
   let live = false, conn = null, stream = null, audioEl = null, roomToken = null, secs = 0, meterTimer = null, reconnectTimer = null, sessionStart = 0;
   let lang = sel.value; let pub = null; let unsubLines = null;
-  const outItems = new Map(); let inBuf = { id:null, text:'' };
   const setStatus = (txt, cls) => { const t = $('#tstatus'); t.innerHTML = `<span class="dot ${cls||''}"></span>${txt}`; };
   const showErr = (m) => { for (const id of ['#terr','#terr2']) { const e=$(id); e.textContent = m||''; e.classList.toggle('hide', !m); } };
 
@@ -266,20 +265,31 @@ async function teacherMain() {
   let reconnecting = false;
   function scheduleReconnect(){ if (reconnecting || !live) return; reconnecting = true; setTimeout(async () => { try { await connect(); showErr(''); } catch (e) { showErr('重連失敗：' + e.message + '，10 秒後再試'); setTimeout(() => { reconnecting = false; scheduleReconnect(); }, 10000); return; } reconnecting = false; }, 1500); }
 
+  // gpt-realtime-translate 只送 delta（沒有 item_id / done），所以自己切句：句尾標點或停頓 1.6 秒就結一行
+  let curOut = null, curIn = null;
+  const SENT_END = /[.!?。！？](["'”’)]*)\s*$/;
+  function newOut() { return { id: 't_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), text:'', seq: Date.now(), el:null, done:false }; }
+  function finishOut(it) { if (!it || it.done) return; clearTimeout(it.timer); it.done = true; it.text = it.text.trim(); renderOut(it); if (it.text) pub.push(it.id, { t: it.text, done: true, seq: it.seq }, true); if (curOut === it) curOut = null; }
   function handleEvent(ev) {
     const t = ev.type || '';
     if (t === 'error') { showErr('OpenAI: ' + JSON.stringify(ev.error || ev).slice(0,300)); return; }
     const txt = evText(ev);
     if (isOut(t)) {
-      const id = ev.item_id || ev.response_id || ('o' + (outItems.size));
-      let it = outItems.get(id); if (!it) { it = { id: 't_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), text:'', seq: Date.now(), el:null }; outItems.set(id, it); }
-      if (isFinal(t)) { if (txt) it.text = txt; it.done = true; } else it.text += txt;
-      renderOut(it); pub.push(it.id, { t: it.text, done: !!it.done, seq: it.seq }, !!it.done);
-      if (it.done) outItems.delete(id);
+      if (isFinal(t)) { if (curOut) { if (txt) curOut.text = txt; finishOut(curOut); } return; }
+      if (!txt) return;
+      if (!curOut) curOut = newOut();
+      const it = curOut; it.text += txt;
+      renderOut(it); pub.push(it.id, { t: it.text, done: false, seq: it.seq }, false);
+      clearTimeout(it.timer);
+      if ((SENT_END.test(it.text) && it.text.length > 12) || it.text.length > 400) finishOut(it);
+      else it.timer = setTimeout(() => finishOut(it), 1600);
     } else if (isIn(t) && $('#showin').checked) {
-      if (isFinal(t)) { if (txt) inBuf.text = txt; inBuf.done = true; } else inBuf.text += txt;
-      renderIn();
-      if (inBuf.done) inBuf = { id:null, text:'' };
+      if (isFinal(t)) { if (curIn) { if (txt) curIn.text = txt; curIn.done = true; renderIn(curIn); curIn = null; } return; }
+      if (!txt) return;
+      if (!curIn) curIn = { text:'', el:null, done:false };
+      const b = curIn; b.text += txt; renderIn(b); clearTimeout(b.timer);
+      if (/[。！？.!?]\s*$/.test(b.text) && b.text.length > 6) { b.done = true; renderIn(b); curIn = null; }
+      else b.timer = setTimeout(() => { b.done = true; renderIn(b); if (curIn === b) curIn = null; }, 1600);
     }
   }
   function renderOut(it) {
@@ -289,10 +299,10 @@ async function teacherMain() {
     while (feed.children.length > 60) feed.firstChild.remove();
     feed.scrollTop = feed.scrollHeight;
   }
-  function renderIn() {
-    const feed = $('#ofeed'); let el = feed.querySelector('.zh.live');
-    if (!el) { el = document.createElement('span'); el.className = 'zh live'; feed.append(el); }
-    el.textContent = '你說：' + inBuf.text; if (inBuf.done) el.classList.remove('live'); feed.scrollTop = feed.scrollHeight;
+  function renderIn(b) {
+    const feed = $('#ofeed');
+    if (!b.el) { b.el = document.createElement('span'); b.el.className = 'zh live'; feed.append(b.el); }
+    b.el.textContent = '你說：' + b.text; if (b.done) b.el.classList.remove('live'); feed.scrollTop = feed.scrollHeight;
   }
   const qEls = new Map();
   function listenLines() {
