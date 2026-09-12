@@ -144,6 +144,7 @@ input,select,textarea{font:inherit;border:1.5px solid var(--line);border-radius:
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/cn2t.js"></script>
 <script>
 /* ================= 共用 ================= */
 const CFG = {
@@ -163,6 +164,8 @@ const IS_STUDENT = ROOM.length === 4;
 const LS = { get:(k,d)=>{try{return localStorage.getItem(k)??d}catch{return d}}, set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}} };
 const langName = c => (CFG.langs.find(x=>x[0]===c)||[c,c])[1].split(' ')[0];
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// 模型吐的中文是簡體（whisper／翻譯輸出都是），全部轉成台灣繁體用語
+let _tw = null; const toTW = s => { try { _tw = _tw || window.OpenCC.Converter({ from:'cn', to:'twp' }); return _tw(String(s||'')); } catch { return String(s||''); } };
 
 firebase.initializeApp(CFG.firebase);
 const db = firebase.firestore();
@@ -302,7 +305,7 @@ async function teacherMain() {
   function renderIn(b) {
     const feed = $('#ofeed');
     if (!b.el) { b.el = document.createElement('span'); b.el.className = 'zh live'; feed.append(b.el); }
-    b.el.textContent = '你說：' + b.text; if (b.done) b.el.classList.remove('live'); feed.scrollTop = feed.scrollHeight;
+    b.el.textContent = '你說：' + toTW(b.text); if (b.done) b.el.classList.remove('live'); feed.scrollTop = feed.scrollHeight;
   }
   const qEls = new Map();
   function listenLines() {
@@ -313,7 +316,7 @@ async function teacherMain() {
         let el = qEls.get(ch.doc.id); const feed = $('#qfeed');
         if (!el) { feed.querySelector('.waiting')?.remove(); el = document.createElement('div'); el.className = 'q'; feed.append(el); qEls.set(ch.doc.id, el); }
         el.classList.toggle('live', !d.done);
-        el.innerHTML = `<div class="who">${esc(d.name||'學員')}</div><div class="zh">${esc(d.t||'')}</div>` + (d.src ? `<div class="src">${esc(d.src)}</div>` : '');
+        el.innerHTML = `<div class="who">${esc(d.name||'學員')}</div><div class="zh">${esc(toTW(d.t||''))}</div>` + (d.src ? `<div class="src">${esc(d.src)}</div>` : '');
         feed.scrollTop = feed.scrollHeight;
       });
       $('#qcount').textContent = qEls.size;
@@ -375,7 +378,7 @@ async function studentMain() {
     if (d.from === 's') {
       const mine = d.name === name && d.mine === presId;
       el.className = 'ln ' + (mine ? 'me' : 'peer');
-      el.innerHTML = `<span class="who">${mine ? 'You' : esc(d.name||'')} asked</span>${esc(d.src||'')}` + (mine && d.t ? `<span class="zh">→ ${esc(d.t)}</span>` : '');
+      el.innerHTML = `<span class="who">${mine ? 'You' : esc(d.name||'')} asked</span>${esc(d.src||'')}` + (mine && d.t ? `<span class="zh">→ ${esc(toTW(d.t))}</span>` : '');
     } else {
       el.className = 'ln' + (d.done ? '' : ' live'); el.textContent = d.t || '';
       if (d.done && $('#tts').checked && !spoken.has(ch.doc.id) && (Date.now() - (d.seq||0)) < 30000) { spoken.add(ch.doc.id); speak(d.t, d.lang); }
@@ -411,10 +414,10 @@ async function studentMain() {
     if (isOut(t)) { if (isFinal(t)) { if (txt) cur.t = txt; } else cur.t += txt; }
     else if (isIn(t)) { if (isFinal(t)) { if (txt) cur.src = txt; } else cur.src += txt; }
     else return;
-    sPub.push(cur.id, { t: cur.t, src: cur.src, seq: cur.seq, done: false }, false);
+    sPub.push(cur.id, { t: toTW(cur.t), src: cur.src, seq: cur.seq, done: false }, false);
     clearTimeout(cur.finTimer); cur.finTimer = setTimeout(() => finalize(cur), holding ? 8000 : 2500);
   }
-  function finalize(c) { if (!c || c.finalized) return; c.finalized = true; sPub.push(c.id, { t: c.t, src: c.src, seq: c.seq, done: true }, true); if (cur === c) cur = null; }
+  function finalize(c) { if (!c || c.finalized) return; c.finalized = true; sPub.push(c.id, { t: toTW(c.t), src: c.src, seq: c.seq, done: true }, true); if (cur === c) cur = null; }
   let holding = false;
   async function down(e) { e.preventDefault(); if (ptt.disabled || holding) return; holding = true; showErr(''); try { ptt.setPointerCapture(e.pointerId); } catch {}
     try { await ensureSession(); } catch (err) { holding = false; setPtt('', '🎤 Hold to speak (English)'); showErr(err.message); return; }
