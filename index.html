@@ -39,6 +39,10 @@ input,select,textarea{font:inherit;border:1.5px solid var(--line);border-radius:
 #qr{width:120px;height:120px;background:#fff;padding:4px;border:1px solid var(--line);border-radius:12px;flex:none}
 #qr img,#qr canvas{width:110px!important;height:110px!important}
 .link{font-size:12px;word-break:break-all;color:var(--mute)}
+.engines{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media(max-width:600px){.engines{grid-template-columns:1fr}}
+.eng{display:flex;gap:10px;align-items:flex-start;border:2px solid var(--line);border-radius:12px;padding:12px;cursor:pointer;background:#fff}
+.eng input{margin-top:4px;accent-color:var(--brand)}.eng b{display:block;font-size:16px}.eng small{display:block;color:var(--mute);font-size:12px;line-height:1.5;margin-top:2px}
+.eng:has(input:checked){border-color:var(--brand);background:var(--brand-soft)}
 .startrow{display:flex;align-items:center;gap:14px;margin-top:6px}
 #start{font-size:20px;padding:16px 34px;border-radius:14px;flex:1}
 .err{background:#fde8e6;color:#8b2c22;padding:12px 14px;border-radius:12px;font-size:14px;margin:10px 0}
@@ -134,10 +138,15 @@ body.screen .ln.me,body.screen .ln.peer{font-size:3vw;background:#222;color:#ddd
         <div class="qrwrap"><div id="qr"></div><div><div class="link" id="roomlink"></div><button class="ghost" id="showqr" style="margin-top:8px">放大 QR 給學員掃</button></div></div>
       </div>
     </div>
-    <div class="card step"><div class="n">1</div><div class="body"><label class="t" for="lang">這堂課要翻成</label><select id="lang"></select><div class="sub">你講中文，學員手機上看到這個語言的字幕；學員按住講話，你這裡看到中文。</div></div></div>
+    <div class="card step"><div class="n">1</div><div class="body"><label class="t">翻譯引擎</label>
+      <div class="engines">
+        <label class="eng"><input type="radio" name="engine" value="free"><div><b>免費模式</b><small>瀏覽器內建辨識＋翻譯 · $0 · 只有字幕 · 老師端要用<u>電腦版 Chrome</u></small></div></label>
+        <label class="eng"><input type="radio" name="engine" value="pro"><div><b>專業模式</b><small>OpenAI 即時口譯 · 邊講邊翻、有語音 · 約 NT$1.1／分鐘</small></div></label>
+      </div><div class="sub" id="engstat"></div></div></div>
+    <div class="card step"><div class="n">2</div><div class="body"><label class="t" for="lang">這堂課要翻成</label><select id="lang"></select><div class="sub">你講中文，學員手機上看到這個語言的字幕；學員按住講話，你這裡看到中文。</div></div></div>
     <div class="card step" id="apirow"><div class="n">·</div><div class="body"><label class="t" for="api">後端網址</label><input id="api" placeholder="Apps Script /exec 網址（Firebase 版免填）" autocomplete="off"></div></div>
-    <div class="card step"><div class="n">2</div><div class="body"><label class="t" for="pin">老師 PIN</label><input id="pin" type="password" inputmode="numeric" placeholder="老師才有的 PIN" autocomplete="off"></div></div>
-    <div class="card step"><div class="n">3</div><div class="body"><label class="t" for="glossary">本堂詞彙 <span style="font-weight:500;color:var(--mute);font-size:13px">（選填，學員手機上會有對照）</span></label><textarea id="glossary" rows="3" placeholder="一行一個，例如：&#10;永生花 = preserved flower&#10;熱熔槍 = hot glue gun"></textarea></div></div>
+    <div class="card step" id="pinrow"><div class="n">3</div><div class="body"><label class="t" for="pin">老師 PIN <span style="font-weight:500;color:var(--mute);font-size:13px">（專業模式才需要）</span></label><input id="pin" type="password" inputmode="numeric" placeholder="老師才有的 PIN" autocomplete="off"></div></div>
+    <div class="card step"><div class="n">4</div><div class="body"><label class="t" for="glossary">本堂詞彙 <span style="font-weight:500;color:var(--mute);font-size:13px">（選填，學員手機上會有對照）</span></label><textarea id="glossary" rows="3" placeholder="一行一個，例如：&#10;永生花 = preserved flower&#10;熱熔槍 = hot glue gun"></textarea></div></div>
     <div id="terr" class="err hide"></div>
     <div class="startrow"><button class="pri" id="start">▶ 開始上課</button><span class="stat" id="setupstat" style="color:var(--mute);font-size:14px"></span></div>
   </div>
@@ -268,6 +277,15 @@ async function teacherMain() {
   const sel = $('#lang'); CFG.langs.filter(l=>l[0]!=='zh').forEach(([c,n]) => { const o=document.createElement('option'); o.value=c; o.textContent=n; sel.append(o); });
   sel.value = LS.get('xbh_live_lang','en');
   $('#pin').value = LS.get('xbh_live_pin','');
+  // 翻譯引擎：free（瀏覽器內建）/ pro（OpenAI）
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const hasTranslator = typeof self.Translator !== 'undefined';
+  let engine = LS.get('xbh_live_engine', (SR && hasTranslator) ? 'free' : 'pro');
+  const engRadios = [...document.querySelectorAll('input[name=engine]')];
+  const applyEngine = () => { engRadios.forEach(r => r.checked = r.value === engine); LS.set('xbh_live_engine', engine);
+    $('#pinrow').classList.toggle('hide', engine === 'free'); $('#glossary').closest('.step').querySelector('.n').textContent = engine === 'free' ? '3' : '4';
+    $('#engstat').textContent = engine === 'free' ? (!SR ? '⚠ 這個瀏覽器沒有語音辨識，免費模式不能用' : (!hasTranslator ? '⚠ 這個瀏覽器沒有內建翻譯（需要電腦版 Chrome 138 以上），免費模式不能用；iPad 請選專業模式' : '✓ 這台裝置可以用免費模式（第一次會下載語言包，約 1 分鐘）')) : ''; };
+  engRadios.forEach(r => r.onchange = () => { engine = r.value; applyEngine(); }); applyEngine();
   $('#api').value = LS.get('xbh_live_api',''); $('#apirow').classList.toggle('hide', CFG.onFirebase);
   $('#glossary').value = LS.get('xbh_live_glossary','');
   let room = LS.get('xbh_live_room',''); if (!/^\d{4}$/.test(room)) room = newRoomCode();
@@ -289,6 +307,7 @@ async function teacherMain() {
   async function start() {
     showErr('');
     const pin = $('#pin').value.trim(); lang = sel.value;
+    if (engine === 'free') return startFree();
     if (!pin) return showErr('請輸入老師 PIN');
     LS.set('xbh_live_pin', pin); LS.set('xbh_live_lang', lang); LS.set('xbh_live_glossary', $('#glossary').value); LS.set('xbh_live_api', $('#api').value.trim());
     $('#start').disabled = true; $('#setupstat').textContent = '開麥克風…';
@@ -304,6 +323,70 @@ async function teacherMain() {
       live = true; listenLines();
       await connect(s.client_secret);
     } catch (e) { showErr(e.message); $('#start').disabled = false; $('#setupstat').textContent = ''; }
+  }
+
+
+  /* ===== 免費模式：Web Speech API 辨識 + Chrome 內建 Translator ===== */
+  let rec = null, trOut = null, trIn = null, freeCur = null, recWanted = false;
+  async function makeTranslator(from, to, label) {
+    for (const src of (from === 'zh' ? ['zh-Hant', 'zh'] : [from])) {
+      try {
+        const av = await Translator.availability({ sourceLanguage: src, targetLanguage: to });
+        if (av === 'unavailable') continue;
+        $('#setupstat').textContent = av === 'available' ? `準備翻譯 ${label}…` : `下載語言包 ${label}…`;
+        return await Translator.create({ sourceLanguage: src, targetLanguage: to, monitor(m) { m.addEventListener('downloadprogress', e => { $('#setupstat').textContent = `下載語言包 ${label} ${Math.round((e.loaded||0)*100)}%`; }); } });
+      } catch (e) { console.warn('translator', src, to, e.message); }
+    }
+    throw new Error(`Chrome 內建翻譯不支援 ${label}`);
+  }
+  async function startFree() {
+    if (!SR) return showErr('這個瀏覽器沒有語音辨識，免費模式不能用');
+    if (!hasTranslator) return showErr('需要電腦版 Chrome 138 以上才有內建翻譯；iPad／手機請選專業模式');
+    LS.set('xbh_live_lang', lang); LS.set('xbh_live_glossary', $('#glossary').value);
+    $('#start').disabled = true;
+    try {
+      // Translator.create 需要使用者互動，放在最前面
+      trOut = await makeTranslator('zh', lang, '中→' + langName(lang));
+      trIn = await makeTranslator('en', 'zh-Hant', '英→中').catch(() => null);
+      await roomRef(room).set({ status:'live', lang, engine:'free', token:null, api:'', glossary: $('#glossary').value.slice(0,4000), startedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+      pub = makePublisher(room, { from:'t', lang });
+      $('#tsetup').classList.add('hide'); $('#tlive').classList.remove('hide');
+      $('#langlabel').textContent = langName(lang); $('#langlabel2').textContent = langName(lang);
+      $('#spk').closest('label').classList.add('hide'); $('#meter').textContent = '免費模式 · NT$0';
+      live = true; listenLines(); startRec();
+    } catch (e) { showErr(e.message); $('#start').disabled = false; $('#setupstat').textContent = ''; }
+  }
+  function startRec() {
+    recWanted = true;
+    rec = new SR(); rec.lang = 'zh-TW'; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+    let lastInterim = 0;
+    rec.onstart = () => setStatus('翻譯中（免費）', 'on');
+    rec.onresult = async (ev) => {
+      let interim = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const r = ev.results[i]; const txt = r[0].transcript.trim(); if (!txt) continue;
+        if (r.isFinal) {
+          const it = freeCur || newOut(); freeCur = null;
+          const b = { text: txt, el: null, done: true }; renderIn(b);
+          try { it.text = await trOut.translate(txt); } catch (e) { it.text = '(翻譯失敗) ' + e.message; }
+          finishOut(it);
+        } else interim += txt;
+      }
+      if (interim) {
+        if (!freeCur) freeCur = newOut();
+        // 即時預覽：節流 700ms 翻一次未定稿的句子
+        const now = Date.now(); if (now - lastInterim > 700) { lastInterim = now; const it = freeCur; trOut.translate(interim).then(t => { if (freeCur === it && !it.done) { it.text = t; renderOut(it); pub.push(it.id, { t: it.text, done: false, seq: it.seq }, false); } }).catch(()=>{}); }
+      }
+    };
+    rec.onerror = (e) => { if (e.error === 'not-allowed') { showErr('麥克風被拒絕，請允許瀏覽器使用麥克風'); recWanted = false; } else if (e.error !== 'no-speech' && e.error !== 'aborted') console.warn('SR', e.error); };
+    rec.onend = () => { if (recWanted && live) { try { rec.start(); } catch { setTimeout(() => { try { rec.start(); } catch {} }, 500); } } else setStatus(live ? '翻譯中（免費）' : '暫停中', live ? 'on' : ''); };
+    try { rec.start(); } catch (e) { showErr('語音辨識啟動失敗：' + e.message); }
+  }
+  function stopRec() { recWanted = false; try { rec?.stop(); } catch {} }
+  // 學員在免費模式只送英文原文，老師端負責翻成中文寫回去
+  async function translateStudentLine(id, d) {
+    if (!trIn || d.t || !d.src || d.tBy) return;
+    try { const zh = await trIn.translate(d.src); roomRef(room).collection('lines').doc(id).set({ t: zh, tBy: 't', done: true }, { merge: true }); } catch (e) { console.warn('trIn', e.message); }
   }
 
   async function connect(secret) {
@@ -365,6 +448,7 @@ async function teacherMain() {
         const d = ch.doc.data(); if (d.from !== 's') return; if (ch.type === 'removed') { qEls.get(ch.doc.id)?.remove(); qEls.delete(ch.doc.id); return; }
         let el = qEls.get(ch.doc.id); const feed = $('#qfeed');
         if (!el) { feed.querySelector('.waiting')?.remove(); el = document.createElement('div'); el.className = 'q'; feed.append(el); qEls.set(ch.doc.id, el); }
+        if (engine === 'free' && !d.t && d.src && d.done) translateStudentLine(ch.doc.id, d);
         el.classList.toggle('live', !d.done);
         const nm = d.name||'學員'; el.innerHTML = `<div class="av">${esc(nm.trim().slice(0,1).toUpperCase())}</div><div><div class="who">${esc(nm)} 問</div><div class="zh">${esc(toTW(d.t||''))}</div>` + (d.src ? `<div class="src"><span class="chip stu">原文</span>${esc(d.src)}</div>` : '') + `</div>`;
         feed.scrollTop = feed.scrollHeight;
@@ -380,12 +464,12 @@ async function teacherMain() {
   $('#start').onclick = start;
   $('#spk').onchange = () => { if (audioEl) audioEl.muted = !$('#spk').checked; };
   $('#pause').onclick = async () => {
-    if (live) { live = false; clearTimeout(reconnectTimer); conn?.close(); conn = null; stopMeter(); setStatus('暫停中（不計費）', ''); $('#pause').textContent = '▶ 繼續上課'; await roomRef(room).set({ status:'paused', updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true }); }
-    else { $('#pause').textContent = '⏸ 暫停'; live = true; await roomRef(room).set({ status:'live', updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true }); connect().catch(e => showErr(e.message)); }
+    if (live) { live = false; clearTimeout(reconnectTimer); conn?.close(); conn = null; stopRec(); stopMeter(); setStatus('暫停中（不計費）', ''); $('#pause').textContent = '▶ 繼續上課'; await roomRef(room).set({ status:'paused', updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true }); }
+    else { $('#pause').textContent = '⏸ 暫停'; live = true; await roomRef(room).set({ status:'live', updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true }); if (engine === 'free') startRec(); else connect().catch(e => showErr(e.message)); }
   };
   $('#end').onclick = async () => {
     if (!confirm('結束這堂課的翻譯？')) return;
-    live = false; clearTimeout(reconnectTimer); conn?.close(); conn = null; stopMeter(); stream?.getTracks().forEach(t=>t.stop()); stream = null;
+    live = false; clearTimeout(reconnectTimer); conn?.close(); conn = null; stopRec(); stopMeter(); stream?.getTracks().forEach(t=>t.stop()); stream = null;
     await roomRef(room).set({ status:'ended', updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
     location.reload();
   };
@@ -419,7 +503,7 @@ async function studentMain() {
     const bn = $('#sbanner'); bn.className = 'banner ' + (s==='paused' ? 'pause' : (s==='ended' ? 'end' : 'hide')); bn.textContent = s==='paused' ? '☕ Teacher paused — take a break · 老師暫停中' : (s==='ended' ? 'Class ended · 課程已結束' : '');
     $('#swait').classList.toggle('hide', s==='live' || s==='paused' || lineEls.size>0);
     const g = (roomData?.glossary||'').trim(); $('#gbox').classList.toggle('hide', !g); $('#gtext').textContent = g;
-    $('#ptt').disabled = !(s==='live' && roomData?.token);
+    $('#ptt').disabled = !(s==='live' && (roomData?.token || roomData?.engine === 'free'));
   }
   function renderLine(ch) {
     const d = ch.doc.data(); const feed = $('#feed');
@@ -429,7 +513,7 @@ async function studentMain() {
     if (d.from === 's') {
       const mine = d.name === name && d.mine === presId;
       el.className = 'ln ' + (mine ? 'me' : 'peer');
-      el.innerHTML = `<span class="who">${mine ? '🙋 You asked' : '🙋 ' + esc(d.name||'') + ' asked'}</span>${esc(d.src||'')}` + (mine && d.t ? `<span class="zh">→ 老師看到：${esc(toTW(d.t))}</span>` : '');
+      el.innerHTML = `<span class="who">${mine ? '🙋 You asked' : '🙋 ' + esc(d.name||'') + ' asked'}</span>${esc(d.src||'')}` + (mine ? `<span class="zh">→ 老師看到：${d.t ? esc(toTW(d.t)) : '…'}</span>` : '');
     } else {
       el.className = 'ln' + (d.done ? '' : ' live'); el.textContent = d.t || '';
       if (d.done && $('#tts').checked && !spoken.has(ch.doc.id) && (Date.now() - (d.seq||0)) < 30000) { spoken.add(ch.doc.id); speak(d.t, d.lang); }
@@ -445,6 +529,21 @@ async function studentMain() {
   $('#big').onchange = () => document.documentElement.style.fontSize = $('#big').checked ? '120%' : '';
 
   // ---- 按住說話（學員 → 中文）----
+  const SSR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let srec = null, srCur = null, srPub = null;
+  function freeDown() {
+    if (!SSR) { showErr('This browser has no speech recognition. Please use Chrome or Safari.'); return false; }
+    srPub = srPub || makePublisher(ROOM, { from:'s', name, mine: presId });
+    srCur = { id: 's_' + Date.now(), src:'', seq: Date.now() };
+    srec = new SSR(); srec.lang = 'en-US'; srec.continuous = true; srec.interimResults = true;
+    srec.onresult = ev => { let fin = '', inter = ''; for (let i = 0; i < ev.results.length; i++) { const r = ev.results[i]; if (r.isFinal) fin += r[0].transcript + ' '; else inter += r[0].transcript; }
+      srCur.src = (fin + inter).trim(); srPub.push(srCur.id, { t:'', src: srCur.src, seq: srCur.seq, done: false }, false); };
+    srec.onerror = e => { if (e.error === 'not-allowed') showErr('Microphone blocked — allow the mic and try again.'); };
+    srec.onend = () => { if (srCur) { const c = srCur; srCur = null; setTimeout(() => srPub.push(c.id, { t:'', src: c.src, seq: c.seq, done: true }, true), 400); } };
+    try { srec.start(); } catch (e) { showErr(e.message); return false; }
+    return true;
+  }
+  function freeUp() { try { srec?.stop(); } catch {} }
   let sConn = null, sStream = null, sPub = null, cur = null, idleTimer = null, connecting = false;
   const ptt = $('#ptt');
   const setPtt = (cls, txt) => { ptt.className = cls; ptt.textContent = txt; };
@@ -471,6 +570,7 @@ async function studentMain() {
   function finalize(c) { if (!c || c.finalized) return; c.finalized = true; sPub.push(c.id, { t: toTW(c.t), src: c.src, seq: c.seq, done: true }, true); if (cur === c) cur = null; }
   let holding = false;
   async function down(e) { e.preventDefault(); if (ptt.disabled || holding) return; holding = true; showErr(''); try { ptt.setPointerCapture(e.pointerId); } catch {}
+    if (roomData?.engine === 'free') { if (freeDown()) setPtt('on', '● Listening… release when done 放開就送出'); else holding = false; return; }
     try { await ensureSession(); } catch (err) { holding = false; setPtt('', '🎤 Hold to speak'); showErr(err.message); return; }
     if (!holding) return;
     clearTimeout(idleTimer);
@@ -478,6 +578,7 @@ async function studentMain() {
     cur = { id: 's_' + Date.now(), t:'', src:'', seq: Date.now() };
     sStream.getAudioTracks().forEach(t => t.enabled = true); setPtt('on', '● Listening… release when done 放開就送出'); }
   function up(e) { if (e) e.preventDefault(); if (!holding) return; holding = false;
+    if (roomData?.engine === 'free') { freeUp(); setPtt('', '🎤 Hold to speak'); return; }
     sStream?.getAudioTracks().forEach(t => t.enabled = false); setPtt('', '🎤 Hold to speak');
     if (cur) { clearTimeout(cur.finTimer); cur.finTimer = setTimeout(() => finalize(cur), 3000); }
     // 放開 75 秒沒再按就把 session 收掉（省錢）
